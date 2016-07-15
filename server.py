@@ -5,6 +5,39 @@ import Queue
 import sys
 import random
 
+#disconnect opponent on win
+#update db of winner
+#game class #playwith ai or playwith opp
+#minmax AI
+#login accounts
+#different functions for diff requests
+
+
+#message meanings :
+#e : exit
+#i : game id
+#m : move info
+#t : there
+#w : wait
+#s : start
+#t : turn
+#u : unique username
+#a : authorised
+def message(**kwargs):
+	msg = {}
+	msg['e'] = 0
+	msg['i'] = 0
+	msg['m'] = 0
+	msg['t'] = 0
+	msg['w'] = 0
+	msg['s'] = 0
+	msg['u'] = 0
+	msg['a'] = 0
+	for key,val in kwargs.iteritems():
+		msg[key] = val
+	return msg
+
+
 class Q(object):
 	def __init__(self):
 		self.q = []
@@ -44,6 +77,7 @@ class server(object):
 		self.waitq = Q()
 		self.clientobj = {}
 		self.notready = []
+		self.pairs = {}
 		print "1.server started on %s , port %d " % (addr,port)
 
 	
@@ -51,7 +85,7 @@ class server(object):
 	def start(self):
 		self.srv.listen(5)
 		while 1:
-			readable,writable,exc = select.select(self.inp,self.outp,self.inp)
+			readable,writable,exc = select.select(self.inp,self.outp,self.outp)
 			for soc in readable:
 				if soc is self.srv:
 					#new connection requested
@@ -65,6 +99,7 @@ class server(object):
 						self.request(soc,msg)
 					else:
 						#client left
+						print soc.getpeername(),"left"
 						if soc in self.outp:
 							self.outp.remove(soc)
 						self.inp.remove(soc)
@@ -72,6 +107,15 @@ class server(object):
 							self.waitq.remove(soc)
 						soc.close()
 						del self.msgq[soc]
+						if soc in self.pairs.keys():
+							opponent = self.pairs[soc]
+							del self.pairs[soc]
+							del self.pairs[opponent]
+							self.inp.remove(opponent)
+							msg = message(e = 1)
+							self.sendmsg(opponent,msg)
+							print opponent.getpeername(),"left"
+
 
 			for soc in writable:
 				print "in write :",soc.getpeername()
@@ -108,19 +152,24 @@ class server(object):
 		if self.waitq.isempty():
 			self.waitq.add(client)
 			print "4.client ",client.getpeername(),"told to wait"
-			self.msgq[client].put(json.dumps("wait"))
+			msg = message(w = 1)
+			self.msgq[client].put(json.dumps(msg))
 		else:
-
 			opponent = self.waitq.pop()
 			print "5.connecting ",opponent.getpeername()," and ",client.getpeername()
+			self.pairs[client] = opponent
+			self.pairs[opponent] = client
 			#self.startgame(client,opponent)
 			turn = random.randrange(2)
 			self.id+=1
 			self.games[self.id] = (client,opponent)
 			print "a"
-			self.sendmsg(client,[self.id,turn])
+			msg = message(i = self.id,t = turn)
+			print msg
+			self.sendmsg(client,msg)
 			print "b"
-			self.sendmsg(opponent,[self.id,1-turn])
+			msg = message(i = self.id,t = 1-turn)
+			self.sendmsg(opponent,msg)
 			#print self.msgq[client],client.getpeername()
 			#print self.msgq[opponent],opponent.getpeername()
 			#print self.inp
@@ -138,10 +187,7 @@ class server(object):
 		print "reached here*******************"
 		msg = json.loads(msg)
 		print "7.received msg",msg,"from",soc.getpeername()
-		tosend = {}
-		tosend['m'] = msg['m']
-		tosend['t'] = 1
-		tosend['e'] = 0                                          
+		tosend = message(m = msg['m'],t = 1)                      
 		id = msg['i']
 		players = self.games[id]
 		if players[0] == soc:
@@ -149,20 +195,32 @@ class server(object):
 		else:
 			opponent = players[0]
 		if msg['e'] == 1:
-			opponent = self.games[id]
+			print "opponent disconnected"
 			#self.msgq[opponent].put(json.dumps(tosened))
+			print "send disc msg to opp"
+			tosend['e'] = 1
 			self.sendmsg(opponent,tosend)
+			print "del game"
 			del self.games[id]
+			del self.pairs[soc]
+			del self.pairs[opponent]
+			print "yes"
+			self.inp.remove(soc)
+			self.inp.remove(opponent)
+
+
 		if msg['m'] != -1:
-			tosend['m'] = msg['m']
-			tosend['t'] = 1
 			#self.msgq[opponent].put(json.dumps(tosend))
 			self.sendmsg(opponent,tosend)
 	def startgame(self,c,o):
 		self.id = self.id+1
 		self.games[self.id] = (c,o)
-		self.msgq[c].put(json.dumps("start"))
-		self.msgq[o].put(json.dumps("start"))
+		msg = message(s=1)
+		self.msgq[c].put(json.dumps(msg))
+		self.msgq[o].put(json.dumps(msg))
+	def endgame(self):
+		pass
+
 	def disconnectop(self,soc):
 		#players = self.games[id]
 		#if players[0] == soc:
