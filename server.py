@@ -6,12 +6,10 @@ import sys
 import random
 import sqlite3
 import os
-
+#to do
+#game stats
 #update db of winner
-#game class #playwith ai or playwith opp
-#minmax AI
-#login accounts
-#different functions for diff requests
+
 
 
 #message meanings :
@@ -26,6 +24,8 @@ import os
 #a : authorised
 #n : new user?
 #o : user online
+
+
 def message(**kwargs):
 	msg = {}
 	msg['e'] = 0
@@ -91,7 +91,7 @@ class server(object):
 			#just connect
 			self.con = sqlite3.connect("data.db")
 			print "database loaded"
-		print "1.server started on %s , port %d " % (addr,port)
+		print "server started on %s , port %d " % (addr,port)
 
 	
 
@@ -133,13 +133,10 @@ class server(object):
 							id = self.getid[soc]
 							del self.getid[soc]
 							self.online.remove(id)
-							del self.getid[soc]
 							del self.pairs[opponent]
 							id = self.getid[opponent]
 							del self.getid[opponent]
 							self.online.remove(id)
-							del self.getid[opponent]
-
 
 							self.inp.remove(opponent)
 							#not deleting from output list to relay message that peer has left 
@@ -150,15 +147,15 @@ class server(object):
 
 
 			for soc in writable:
-				print "in write :",soc.getpeername()
+				#print "in write :",soc.getpeername()
 				try:
 					next_msg = self.msgq[soc].get_nowait()
 				except Queue.Empty:
 					# No messages waiting so stop checking for writability.
-					print >>sys.stderr, '2.output queue for', soc.getpeername(), 'is empty'
+					#print >>sys.stderr, '2.output queue for', soc.getpeername(), 'is empty'
 					self.outp.remove(soc)
 				else:
-					print >>sys.stderr, '3.sending "%s" to %s' % (next_msg, soc.getpeername())
+					#print >>sys.stderr, '3.sending "%s" to %s' % (next_msg, soc.getpeername())
 					soc.send(next_msg)
 			    # Handle "exceptional conditions"
 
@@ -194,7 +191,7 @@ class server(object):
 
 	def request(self,soc,msg):
 		msg = json.loads(msg)
-		print "received",msg,"from",soc.getpeername()
+		#print "received",msg,"from",soc.getpeername()
 		
 		#database operation : (login/auth/player stat (from gamestats))
 		if msg['d']!=0:
@@ -213,18 +210,25 @@ class server(object):
 			#handle close requests , when msg['e'] = 1
 			
 			if msg['e'] == 1:
-				print "opponent disconnected"
+				#print "opponent disconnected"
 				#self.msgq[opponent].put(json.dumps(tosened))
-				print "send disc msg to opp"
+				#print "send disc msg to opp"
 				tosend['e'] = 1
 				self.sendmsg(opponent,tosend)
-				print "del game"
+				#print "del game"
 				del self.games[id]
 				del self.pairs[soc]
+				uid = self.getid[soc]
+				del self.getid[soc]
+				self.online.remove(uid)
 				del self.pairs[opponent]
-				print "yes"
+				uid = self.getid[opponent]
+				del self.getid[opponent]
+				self.online.remove(uid)
+				#print "yes"
 				self.inp.remove(soc)
 				self.inp.remove(opponent)
+
 
 			#forward game moves
 			if msg['m'] != -1:
@@ -234,11 +238,10 @@ class server(object):
 
 
 	def	auth_client(self,soc,msg):
-		print "loging in ..."
+		#print "loging in .."
 		tup = msg['t']
 		loggedin = 0
-		sql = "select id from users where uname = ?"
-		userid = self.con.execute(sql,(tup[0],)).fetchall()[0][0]
+		userid = -1
 		if msg['d'] == 1:
 			#create new user
 			sql = "select count(1) from users where uname = ?"
@@ -253,42 +256,47 @@ class server(object):
 				#add record and log in and send auth
 				sql = "insert into users(uname,password,email,tgames,wgames) values(?,?,?,0,0);"
 				self.con.execute(sql,tup)
+				self.con.commit()
 				loggedin = 1
 				tosend = message(a = 1)
 				self.sendmsg(soc,tosend)
 				print "new user added to db"
+				sql = "select id from users where uname = ?"
+				userid = self.con.execute(sql,(tup[0],)).fetchall()[0][0]
 		elif msg['d']==2:
 			#log in existing user
 			sql = "select count(1) from users where uname = ?"
 			existing = self.con.execute(sql,(tup[0],)).fetchall()[0][0]
+			if existing == 1:
+				sql = "select id from users where uname = ?"
+				userid = self.con.execute(sql,(tup[0],)).fetchall()[0][0]
 			sql = "select password from users where uname = ?;"
 			password = self.con.execute(sql,(tup[0],)).fetchall()
 			if password != []:
 				(password,) = password[0]
-				print password
-			print tup
-			print "user enetered",tup[1],"existing ?",existing
+				
+			
 			if userid in self.online:
 				tosend = message(a = 0,o = 1)
 				self.sendmsg(soc,tosend)
-				print "user already online"
+				
 			elif tup[1] == password and existing == 1:
 				#password matched send an auth
 				tosend = message(a = 1,o=0)
 				self.sendmsg(soc,tosend)
 				loggedin  = 1
-				print "details matched logging in "
+				
 				
 			else:
 				#send retry
-				print "not logged in /pass"
+				
 				tosend = message(a = 0,o=0)
 				print tosend
 				self.sendmsg(soc,tosend)
-				print "wrong uname pass combo"
+				
 		#if logged in add to wait list
 		if loggedin == 1 :
-			print "logged in successfully"
+			print soc.getpeername(),"logged in successfully"
 			self.getid[soc] = userid
 			self.online.append(userid)
 			if self.waitq.isempty():
@@ -323,30 +331,15 @@ class server(object):
 		msg = message(s=1)
 		self.msgq[c].put(json.dumps(msg))
 		self.msgq[o].put(json.dumps(msg))
-	
-
-
-
-	def endgame(self):
-		pass
-
-	
-
-
-
-	def disconnectop(self,soc):
-		#players = self.games[id]
-		#if players[0] == soc:
-		#	opponent = players[1]
-		#	self.msgq[o].put(json.dumps("wait"))
-		pass
 
 
 
 
-if sys.argv == []:
-	print >>sys.stderr, '8.enter hostname and port for server'
-else:
-	args = sys.argv[1:]
-gameserver = server(args[0],int(args[1]))
-gameserver.start()
+if __name__ == "__main__":
+	if sys.argv == []:
+		addr = ("",5000)
+	else:
+		args = sys.argv[1:]
+		addr = (args[0],int(args[1]))
+	gameserver = server(addr)
+	gameserver.start()

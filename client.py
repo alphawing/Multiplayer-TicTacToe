@@ -3,22 +3,17 @@ import select
 import json
 import sys
 import getpass
+from tictactoe import *
 #todo
-
-#login
-
-#done : player class
-
-#win notification send msg exit
-#loss notification exit
-#send game over if win , other will quit auto due to loss
+#send game stats to server
+#allow connected users to play another match
 
 
-#database
+
+
+
+#todo
 #update winner record  level up
-
-#game class - main class 
-
 def message(a,**kwargs):
 	msg = {}
 	if a == 1:	
@@ -44,7 +39,7 @@ def getmove():
 
 def send(soc,msg):
 	data = json.dumps(msg)
-	print "sending ",data
+	#print "sending ",data
 	soc.send(data)
 
 
@@ -58,20 +53,14 @@ def recv(soc):
 
 
 def login():
-	print "wanna login ?"
+	print "1. SIGN IN\n2.SIGN UP (new user?)"
 	ans = int(raw_input())
-	if ans == 0 :
-		pass
+	if ans==2:
+		r = (0,) + getsignup()
 	else:
-		print "new user/existing?"
-		ans = int(raw_input())
-		if ans==0:
-			r = (0,) + getsignup()
-		else:
-			#retreive old user
-			r = (1,) + getlogin()
-		return r
-	return
+		#retreive old user
+		r = (1,) + getlogin()
+	return r
 def getsignup():
 	print "SIGNUP"
 	#create new user
@@ -91,9 +80,6 @@ def getlogin():
 	#sendmsg({'l':[uname,pw]})
 	r = (uname,pw)
 	return r
-
-
-
 
 class play_online(object):
 	def __init__(self,addr,data):
@@ -115,7 +101,7 @@ class play_online(object):
 			while self.loggedin!=1:
 				tosend = message(1,d = 2,t = data)
 				send(self.player,tosend)
-				print "listening response"
+				#print "listening response"
 				response = recv(self.player)
 				self.loggedin = response['a']
 				if self.loggedin==0:
@@ -165,6 +151,15 @@ class play_online(object):
 	def play_game(self):
 
 		#if player has first move , then send data
+		print "->game started\n->enter moves as digits from 1 to 9\n->enter -1 to leave game"
+		board = tictactoe()
+		board.show()
+		if self.turn ==1:
+			player = 'X'
+			print "you are ",player
+		else:
+			player = 'O'
+			print "you are ",player
 		if self.turn==1:
 			print "my turn"
 			move = getmove()
@@ -172,16 +167,25 @@ class play_online(object):
 				self.msg['e'] = 1
 				self.close = 1
 			else:
+				valid = 0
+				while valid !=1:
+					if not move-1 in board.valid_moves():
+						print "invalid move"
+						move = getmove()
+					else:
+						valid = 1
+				board.play_move(move-1, player)
+				board.show()
 				self.msg['m'] = move
 				self.g+=1
-				self.a+=1
+				#self.a+=1
 				send(self.player,self.msg)
 		if self.close==1:
 			self.player.close()
 		else:
 			print "opponents turn"
 		#get opponnents move and send move
-		while self.close!=1 and self.g<9:
+		while self.close!=1 and not board.over():
 			data = recv(self.player)
 			print "received ",data
 			if data['e'] == 1:
@@ -189,27 +193,38 @@ class play_online(object):
 				self.player.close()
 				break
 			print "opponents move :",data['m']
+			move = data['m']
+			board.play_move(move-1, board.opponent(player))
+			board.show()
 			self.g+=1
 			print "g:",self.g
 			self.b+=data['m']
-			if self.g==9:
-				print "game over ,disconnecting"
-				self.closegame()
+			if board.over():
+				print "game over !!!"
+				self.closegame(board,player)
 				break
 			else:
+				print "your turn"
 				move = getmove()
 				if move == -1:
 					self.msg['e'] = 1
 					self.close = 1
 				else:
+					valid =0
+					while valid !=1:
+						if not move-1 in board.valid_moves():
+							print "invalid move"
+							move = getmove()
+						else:
+							valid = 1
+					board.play_move(move-1, player)
+					board.show()
 					self.msg['m'] = move
-					self.g+=1
-					self.a+=move
 				send(self.player,self.msg)
-				print "opponrnts turn"
-			if self.g==9:
-				print "game over ,disconnecting"
-				self.closegame()
+				print "opponents turn"
+			if board.over():
+				print "game over"
+				self.closegame(board,player)
 				break
 			if self.close==1:
 				print "game terminated"
@@ -221,18 +236,20 @@ class play_online(object):
 
 
 
-	def sendgamestats(self):
-		print "sending game stat"
-		if self.a>self.b:
-			print "you won !"
-			self.msg['c'] = 1
-			print "sending game stat"
-			data = json.dumps(self.msg)
+	def sendgamestats(self,board,player):
+		#print "game stat"
+		if board.winner()==player:
+			print "you won !!"
+			#self.msg['c'] = 1
+			#print "sending game stat"
+			#data = json.dumps(self.msg)
+		elif board.winner() == None:
+			print "its a tie!!"
+			#self.msg['c'] = 1
+			#print "sending game stat"
+			#data = json.dumps(self.msg)
 		else:
-			print "you lost"
-			self.msg['c'] = 1
-			print "sending game stat"
-			data = json.dumps(self.msg)
+			print "you lost!!"
 
 
 
@@ -242,9 +259,9 @@ class play_online(object):
 
 
 
-
-	def closegame(self):
-		self.sendgamestats()
+	def closegame(self,board = None , player = None):
+		if (board!=None and player != None):
+			self.sendgamestats(board,player)
 		print "closing connection"
 		self.player.close()
 		print "disconnected"
@@ -253,8 +270,30 @@ class play_online(object):
 
 
 
-class play_offline():
-	pass
+def play_offline():
+	board = tictactoe()
+	board.show()
+	Ai = AIbot('O')
+	while not board.over():
+		player = 'X'
+		move = int(raw_input("Next Move: ")) - 1
+		if not move in board.valid_moves():
+			print "invalid move"
+			continue
+		board.play_move(move, player)
+		#board.show()
+		if board.over():
+			break
+		computer_move = Ai.makemove(board)
+		print computer_move
+		board.play_move(computer_move, 'O')
+		board.show()
+	board.show()
+	winner = board.winner()
+	if winner == None:
+		print "its a tie"
+	else:
+		print winner,"won"
 
 
 
@@ -267,15 +306,15 @@ class play_offline():
 
 
 
-addr = ("",5000)
 args = sys.argv[1:]
-if args:
-	addr = (args[0],args[1])
-data = login()
-if data == None:
-	#play offline
-	pass
+if args == []:
+	play_offline()
 else:
+	if args[0] == 'd':
+		addr = ("",5000)
+	else:
+		addr = (args[0],args[1])
+	data = login()
 	newgame = play_online(addr,data)
 
 
