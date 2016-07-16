@@ -4,8 +4,9 @@ import json
 import Queue
 import sys
 import random
+import sqlite3
+import os
 
-#disconnect opponent on win
 #update db of winner
 #game class #playwith ai or playwith opp
 #minmax AI
@@ -17,12 +18,14 @@ import random
 #e : exit
 #i : game id
 #m : move info
-#t : there
+#t : info tuple
 #w : wait
 #s : start
 #t : turn
 #u : unique username
 #a : authorised
+#n : new user?
+#o : user online
 def message(**kwargs):
 	msg = {}
 	msg['e'] = 0
@@ -70,14 +73,24 @@ class server(object):
 		self.inp = [self.srv]
 		self.games = {}
 		self.id=0
-		self.ng = 0
 		self.waiting = []
 		self.outp = []
 		self.msgq = {}
 		self.waitq = Q()
-		self.clientobj = {}
-		self.notready = []
 		self.pairs = {}
+		self.online = []
+		self.getid = {}
+		if not os.path.exists("data.db"):
+			#create database,add table
+			self.con = sqlite3.connect("data.db")
+			sql = "create table users(id integer primary key autoincrement,uname varchar,password varchar,email varchar,tgames integer,wgames integer)"
+			self.con.execute(sql)
+			self.con.commit()
+			print "Database created"
+		else:
+			#just connect
+			self.con = sqlite3.connect("data.db")
+			print "database loaded"
 		print "1.server started on %s , port %d " % (addr,port)
 
 	
@@ -117,7 +130,17 @@ class server(object):
 							#get opponent of soc (todo : find better way)
 							opponent = self.pairs[soc]
 							del self.pairs[soc]
+							id = self.getid[soc]
+							del self.getid[soc]
+							self.online.remove(id)
+							del self.getid[soc]
 							del self.pairs[opponent]
+							id = self.getid[opponent]
+							del self.getid[opponent]
+							self.online.remove(id)
+							del self.getid[opponent]
+
+
 							self.inp.remove(opponent)
 							#not deleting from output list to relay message that peer has left 
 							msg = message(e = 1)
@@ -158,30 +181,7 @@ class server(object):
 		self.msgq[client] = Queue.Queue()#q for outgoing msgs
 		#if client not in self.outp:# ***resolved*** removing this ? causes client to ask for one more move after peer disconnect
 		self.outp.append(client)
-		if self.waitq.isempty():
-			#if no one is availabe , tell client to wait
-			self.waitq.add(client)
-			print "4.client ",client.getpeername(),"told to wait"
-			msg = message(w = 1)
-			self.msgq[client].put(json.dumps(msg))
-		else:
-			#remove one from  wait list and pair
-			opponent = self.waitq.pop()
-			print "5.connecting ",opponent.getpeername()," and ",client.getpeername()
-			#find  a better way
-			self.pairs[client] = opponent
-			self.pairs[opponent] = client
-			#self.startgame(client,opponent)
-			#generate random turn
-			turn = random.randrange(2)
-			#assign a game id
-			self.id+=1
-			self.games[self.id] = (client,opponent)
-			#send message to stop waiting and initialize game env
-			msg = message(i = self.id,t = turn)
-			self.sendmsg(client,msg)
-			msg = message(i = self.id,t = 1-turn)
-			self.sendmsg(opponent,msg)
+		
 
 	
 	def sendmsg(self,soc,msg):
@@ -194,46 +194,127 @@ class server(object):
 
 	def request(self,soc,msg):
 		msg = json.loads(msg)
-		print "7.received msg",msg,"from",soc.getpeername()
+		print "received",msg,"from",soc.getpeername()
 		
 		#database operation : (login/auth/player stat (from gamestats))
-		if msg['d']==1:
-			
+		if msg['d']!=0:
+			self.auth_client(soc,msg)
 
-
-
-		#get game id , pair,opponent
-		tosend = message(m = msg['m'],t = 1)                      
-		id = msg['i']
-		players = self.games[id]
-		if players[0] == soc:
-			opponent = players[1]
 		else:
-			opponent = players[0]
+			#get game id , pair,opponent
+			tosend = message(m = msg['m'],t = 1)                      
+			id = msg['i']
+			players = self.games[id]
+			if players[0] == soc:
+				opponent = players[1]
+			else:
+				opponent = players[0]
 
-		#handle close requests , when msg['e'] = 1
-		
-		if msg['e'] == 1:
-			print "opponent disconnected"
-			#self.msgq[opponent].put(json.dumps(tosened))
-			print "send disc msg to opp"
-			tosend['e'] = 1
-			self.sendmsg(opponent,tosend)
-			print "del game"
-			del self.games[id]
-			del self.pairs[soc]
-			del self.pairs[opponent]
-			print "yes"
-			self.inp.remove(soc)
-			self.inp.remove(opponent)
+			#handle close requests , when msg['e'] = 1
+			
+			if msg['e'] == 1:
+				print "opponent disconnected"
+				#self.msgq[opponent].put(json.dumps(tosened))
+				print "send disc msg to opp"
+				tosend['e'] = 1
+				self.sendmsg(opponent,tosend)
+				print "del game"
+				del self.games[id]
+				del self.pairs[soc]
+				del self.pairs[opponent]
+				print "yes"
+				self.inp.remove(soc)
+				self.inp.remove(opponent)
 
-		#forward game moves
-		
-		if msg['m'] != -1:
-			#self.msgq[opponent].put(json.dumps(tosend))
-			self.sendmsg(opponent,tosend)
+			#forward game moves
+			if msg['m'] != -1:
+				#self.msgq[opponent].put(json.dumps(tosend))
+				self.sendmsg(opponent,tosend)
 	
 
+
+	def	auth_client(self,soc,msg):
+		print "loging in ..."
+		tup = msg['t']
+		loggedin = 0
+		sql = "select id from users where uname = ?"
+		userid = self.con.execute(sql,(tup[0],)).fetchall()[0][0]
+		if msg['d'] == 1:
+			#create new user
+			sql = "select count(1) from users where uname = ?"
+			existing = self.con.execute(sql,(tup[0],)).fetchall()[0][0]
+			if existing == 1:
+				#user exists already send retry
+				tosend = message(a = 0)
+				self.sendmsg(soc,tosend)
+				print "user already exists"
+
+			else:
+				#add record and log in and send auth
+				sql = "insert into users(uname,password,email,tgames,wgames) values(?,?,?,0,0);"
+				self.con.execute(sql,tup)
+				loggedin = 1
+				tosend = message(a = 1)
+				self.sendmsg(soc,tosend)
+				print "new user added to db"
+		elif msg['d']==2:
+			#log in existing user
+			sql = "select count(1) from users where uname = ?"
+			existing = self.con.execute(sql,(tup[0],)).fetchall()[0][0]
+			sql = "select password from users where uname = ?;"
+			password = self.con.execute(sql,(tup[0],)).fetchall()
+			if password != []:
+				(password,) = password[0]
+				print password
+			print tup
+			print "user enetered",tup[1],"existing ?",existing
+			if userid in self.online:
+				tosend = message(a = 0,o = 1)
+				self.sendmsg(soc,tosend)
+				print "user already online"
+			elif tup[1] == password and existing == 1:
+				#password matched send an auth
+				tosend = message(a = 1,o=0)
+				self.sendmsg(soc,tosend)
+				loggedin  = 1
+				print "details matched logging in "
+				
+			else:
+				#send retry
+				print "not logged in /pass"
+				tosend = message(a = 0,o=0)
+				print tosend
+				self.sendmsg(soc,tosend)
+				print "wrong uname pass combo"
+		#if logged in add to wait list
+		if loggedin == 1 :
+			print "logged in successfully"
+			self.getid[soc] = userid
+			self.online.append(userid)
+			if self.waitq.isempty():
+				#if no one is availabe , tell client to wait
+				self.waitq.add(soc)
+				print "4.client ",soc.getpeername(),"told to wait"
+				msg = message(w = 1)
+				self.msgq[soc].put(json.dumps(msg))
+			else:
+				#remove one from  wait list and pair
+				opponent = self.waitq.pop()
+				print "5.connecting ",opponent.getpeername()," and ",soc.getpeername()
+				#find  a better way
+				self.pairs[soc] = opponent
+				self.pairs[opponent] = soc
+				#self.startgame(client,opponent)
+				#generate random turn
+				turn = random.randrange(2)
+				#assign a game id
+				self.id+=1
+				self.games[self.id] = (soc,opponent)
+				#send message to stop waiting and initialize game env
+				msg = message(i = self.id,t = turn)
+				self.sendmsg(soc,msg)
+				msg = message(i = self.id,t = 1-turn)
+				self.sendmsg(opponent,msg)
 
 
 	def startgame(self,c,o):
@@ -269,6 +350,3 @@ else:
 	args = sys.argv[1:]
 gameserver = server(args[0],int(args[1]))
 gameserver.start()
-
-
-

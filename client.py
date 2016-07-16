@@ -19,14 +19,16 @@ import getpass
 
 #game class - main class 
 
-def message(**kwargs):
+def message(a,**kwargs):
 	msg = {}
-	msg['m'] = 0#move
-	msg['e'] = 0#exit
-	msg['t'] = 0#?
-	msg['i'] = 0#id
-	msg['c'] = -1#game winner
-	msg['d'] = 0#database operation request
+	if a == 1:	
+		#initialize default values of flags
+		msg['m'] = 0#move
+		msg['e'] = 0#exit
+		msg['t'] = 0#information tuple
+		msg['i'] = 0#id
+		msg['c'] = -1#game winner
+		msg['d'] = 0#database operation request
 	for key,val in kwargs.iteritems():
 		msg[key] = val
 	return msg
@@ -64,28 +66,31 @@ def login():
 		print "new user/existing?"
 		ans = int(raw_input())
 		if ans==0:
-			#create new user
-			print "enter user name :"
-			uname = str(raw_input())
-			print "enter name :"
-			name = str(raw_input())
-			print "enter email :"
-			email = str(raw_input())
-			print "enter user :"
-			pw = getpass.getpass()
-			#sendmsg({'n':[uname,pw,name,email]})
-			r = (ans,uname,name,email,pw)
+			r = (0,) + getsignup()
 		else:
 			#retreive old user
-			print "enter user name :"
-			uname = str(raw_input())
-			print "enter user password :"
-			pw = getpass.getpass()
-			#sendmsg({'l':[uname,pw]})
-			r = (ans,uname,pw)
+			r = (1,) + getlogin()
 		return r
 	return
-
+def getsignup():
+	print "SIGNUP"
+	#create new user
+	print "enter user name :"
+	uname = str(raw_input())
+	print "enter email :"
+	email = str(raw_input())
+	pw = getpass.getpass()
+	#sendmsg({'n':[uname,pw,name,email]})
+	r = (uname,email,pw)
+	return r
+def getlogin():
+	print "LOGIN"
+	print "enter user name :"
+	uname = str(raw_input())
+	pw = getpass.getpass()
+	#sendmsg({'l':[uname,pw]})
+	r = (uname,pw)
+	return r
 
 
 
@@ -95,22 +100,45 @@ class play_online(object):
 		self.player = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
 		self.player.connect(addr)
 		print >>sys.stderr, 'connected to %s port %s' % (addr)
-		self.msg = message(m=0,e=0,t=0,i=0,s=0,c=-1)
+		self.msg = message(1,m=0,e=0,t=0,i=0,s=0,c=-1)
 		self.g = 0
 		self.close = 0
 		self.turn = 0
 		self.won = 0
 		self.a=0
 		self.b=0
-		if data[0]==1:
+		self.loggedin = 0
+		mode = data[0]
+		data = data[1:]
+		if mode ==1:
 			#existing account
-			pass
+			while self.loggedin!=1:
+				tosend = message(1,d = 2,t = data)
+				send(self.player,tosend)
+				print "listening response"
+				response = recv(self.player)
+				self.loggedin = response['a']
+				if self.loggedin==0:
+					if response['o'] == 1:
+						print "user already online"
+					else:
+						print "Wrong Username password combination"
+					data = getlogin()
+					
 		else:
-			#create new account in server db
-			pass
+			while self.loggedin!=1:
+				#create new account in server db
+				tosend = message(1,d = 1,t = data)
+				send(self.player,tosend)
+				response = recv(self.player)
+				self.loggedin = response['a']
+				if self.loggedin==0:
+					print "User already exists. Try again!"
+					data = getsignup()
+				pass
+			print "logged in successfully"
 		self.connect_peer()
 		self.play_game()
-
 
 
 
@@ -225,6 +253,8 @@ class play_online(object):
 
 
 
+class play_offline():
+	pass
 
 
 
