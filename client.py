@@ -4,12 +4,17 @@ import json
 import sys
 import getpass
 from tictactoe import *
+import os
 #todo
 #send game stats to server
 #allow connected users to play another match
 
 
-
+def hprint(s):
+	rows, col = os.popen('stty size', 'r').read().split()
+	print "".join(['-']*int(col))
+	print s
+	print "".join(['-']*int(col))
 
 
 #todo
@@ -46,7 +51,10 @@ def send(soc,msg):
 
 
 def recv(soc):
-	data = json.loads(str(soc.recv(1024)))
+	rec = soc.recv(1024)
+	#print "received",rec
+	data = json.loads(str(rec))
+	
 	return data
 
 
@@ -82,10 +90,11 @@ def getlogin():
 	return r
 
 class play_online(object):
-	def __init__(self,addr,data):
+	def __init__(self,addr):
 		self.player = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
 		self.player.connect(addr)
 		print >>sys.stderr, 'connected to %s port %s' % (addr)
+		data = login()
 		self.msg = message(1,m=0,e=0,t=0,i=0,s=0,c=-1)
 		self.g = 0
 		self.close = 0
@@ -151,15 +160,15 @@ class play_online(object):
 	def play_game(self):
 
 		#if player has first move , then send data
-		print "->game started\n->enter moves as digits from 1 to 9\n->enter -1 to leave game"
+		hprint("->game started\n->enter moves as digits from 1 to 9\n->enter -1 to leave game")
 		board = tictactoe()
 		board.show()
 		if self.turn ==1:
 			player = 'X'
-			print "you are ",player
+			hprint ("you are " + player)
 		else:
 			player = 'O'
-			print "you are ",player
+			hprint ("you are "+player)
 		if self.turn==1:
 			print "my turn"
 			move = getmove()
@@ -187,7 +196,7 @@ class play_online(object):
 		#get opponnents move and send move
 		while self.close!=1 and not board.over():
 			data = recv(self.player)
-			print "received ",data
+			#print "received ",data
 			if data['e'] == 1:
 				print "peer disconnected"
 				self.player.close()
@@ -200,7 +209,7 @@ class play_online(object):
 			print "g:",self.g
 			self.b+=data['m']
 			if board.over():
-				print "game over !!!"
+				hprint("game over !!!")
 				self.closegame(board,player)
 				break
 			else:
@@ -239,17 +248,17 @@ class play_online(object):
 	def sendgamestats(self,board,player):
 		#print "game stat"
 		if board.winner()==player:
-			print "you won !!"
+			hprint("you won !!")
 			#self.msg['c'] = 1
 			#print "sending game stat"
 			#data = json.dumps(self.msg)
 		elif board.winner() == None:
-			print "its a tie!!"
+			hprint("its a tie!!")
 			#self.msg['c'] = 1
 			#print "sending game stat"
 			#data = json.dumps(self.msg)
 		else:
-			print "you lost!!"
+			hprint("you lost!!")
 
 
 
@@ -310,12 +319,11 @@ args = sys.argv[1:]
 if args == []:
 	play_offline()
 else:
-	if args[0] == 'd':
+	if args[0] == 'o':
 		addr = ("",5000)
 	else:
 		addr = (args[0],args[1])
-	data = login()
-	newgame = play_online(addr,data)
+	newgame = play_online(addr)
 
 
 

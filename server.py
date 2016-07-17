@@ -24,7 +24,11 @@ import os
 #a : authorised
 #n : new user?
 #o : user online
-
+def hprint(s):
+	rows, col = os.popen('stty size', 'r').read().split()
+	print "".join(['-']*int(col))
+	print s
+	print "".join(['-']*int(col))
 
 def message(**kwargs):
 	msg = {}
@@ -65,11 +69,11 @@ class Q(object):
 		self.q.remove(a)
 
 class server(object):
-	def __init__(self,addr,port):
+	def __init__(self,addr):
 		self.srv = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
 		self.srv.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
 		self.srv.setblocking(0)
-		self.srv.bind((addr,port))
+		self.srv.bind(addr)
 		self.inp = [self.srv]
 		self.games = {}
 		self.id=0
@@ -90,84 +94,91 @@ class server(object):
 		else:
 			#just connect
 			self.con = sqlite3.connect("data.db")
-			print "database loaded"
-		print "server started on %s , port %d " % (addr,port)
-
+			hprint( "database loaded")
+		hprint( "server started on " +str(addr))
 	
 
 	def start(self):
 		self.srv.listen(5)
 		while 1:
-			readable,writable,exc = select.select(self.inp,self.outp,self.outp)
-			for soc in readable:
-				if soc is self.srv:
-					#new connection requested
-					self.newcon()
-				else:
-					data = soc.recv(1024)
-					if data:
-						#client has some data
-						#msg = json.loads(str(data))
-						msg = str(data)
-						#process client request messages
-						self.request(soc,msg)
+			try:			
+				readable,writable,exc = select.select(self.inp,self.outp,self.inp)
+				for soc in readable:
+					if soc is self.srv:
+						#new connection requested
+						self.newcon()
 					else:
-						#client left
-						print soc.getpeername(),"left"
-						#remov soc from output list
-						if soc in self.outp:
-							self.outp.remove(soc)
-						#remov soc from input list
-						self.inp.remove(soc)
-						#remove if waiting
-						if soc in self.waitq.q:
-							self.waitq.remove(soc)
-						soc.close()
-						#delete soc's output message queue
-						del self.msgq[soc]
-						#disconnect soc's oponent
-						if soc in self.pairs.keys():
-							#get opponent of soc (todo : find better way)
-							opponent = self.pairs[soc]
-							del self.pairs[soc]
+						data = soc.recv(2048)
+						if data:
+							#client has some data
+							#msg = json.loads(str(data))
+							msg = str(data)
+							#process client request messages
+							self.request(soc,msg)
+						else:
+							#client left
+							hprint(str(soc.getpeername()) + "left")
+							#remov soc from output list
+							if soc in self.outp:
+								self.outp.remove(soc)
+							#remov soc from input list
+							self.inp.remove(soc)
+							#remove if waiting
+							if soc in self.waitq.q:
+								self.waitq.remove(soc)
+							soc.close()
+							#delete soc's output message queue
+							del self.msgq[soc]
 							id = self.getid[soc]
 							del self.getid[soc]
 							self.online.remove(id)
-							del self.pairs[opponent]
-							id = self.getid[opponent]
-							del self.getid[opponent]
-							self.online.remove(id)
+							#disconnect soc's oponent
+							if soc in self.pairs.keys():
+								#get opponent of soc (todo : find better way)
+								opponent = self.pairs[soc]
+								del self.pairs[soc]
+								del self.pairs[opponent]
+								id = self.getid[opponent]
+								del self.getid[opponent]
+								self.online.remove(id)
+								self.inp.remove(opponent)
+								#not deleting from output list to relay message that peer has left 
+								msg = message(e = 1)
+								self.sendmsg(opponent,msg)
+								hprint( str(opponent.getpeername())+"left")
+								#not closing connection ??? because opponent does it itself
 
-							self.inp.remove(opponent)
-							#not deleting from output list to relay message that peer has left 
-							msg = message(e = 1)
-							self.sendmsg(opponent,msg)
-							print opponent.getpeername(),"left"
-							#not closing connection ??? because opponent does it itself
 
+				for soc in writable:
+					#hprint( "in write :" + str(soc.getpeername()))
+					pass
+					try:
+						next_msg = self.msgq[soc].get_nowait()
+					except Queue.Empty:
+						# No messages waiting so stop checking for writability.
+						#hprint('removing '+str(soc.getpeername())+' from writable')
+						self.outp.remove(soc)
+					else:
+						hprint( 'sending ' + next_msg +"\nto " + str(soc.getpeername()))
+						soc.send(next_msg)
+				    # Handle "exceptional conditions"
 
-			for soc in writable:
-				#print "in write :",soc.getpeername()
-				try:
-					next_msg = self.msgq[soc].get_nowait()
-				except Queue.Empty:
-					# No messages waiting so stop checking for writability.
-					#print >>sys.stderr, '2.output queue for', soc.getpeername(), 'is empty'
-					self.outp.remove(soc)
-				else:
-					#print >>sys.stderr, '3.sending "%s" to %s' % (next_msg, soc.getpeername())
-					soc.send(next_msg)
-			    # Handle "exceptional conditions"
-
-			for soc in exc:
-				print >>sys.stderr, 'handling exceptional condition for', soc.getpeername()
-				# Stop listening for input on the connection
-				self.inp.remove(soc)
-				if soc in self.outp:
-				    self.outp.remove(soc)
-				soc.close()
-				# Remove message queue
-				del self.msgq[soc]
+				for soc in exc:
+					hprint('handling exceptional condition for' + str(soc.getpeername()))
+					# Stop listening for input on the connection
+					self.inp.remove(soc)
+					if soc in self.outp:
+					    self.outp.remove(soc)
+					soc.close()
+					# Remove message queue
+					del self.msgq[soc]
+			except KeyboardInterrupt:
+					hprint( "closing server")
+					#close client connections
+					for client in self.inp:
+						client.close()
+					self.srv.close()
+					sys.exit()
 
 
 	def newcon(self):
@@ -184,12 +195,16 @@ class server(object):
 	def sendmsg(self,soc,msg):
 		if soc not in self.outp:
 			self.outp.append(soc)
+		#print "sending to ",soc.getpeername()
+		#print json.dumps(msg)
 		self.msgq[soc].put(json.dumps(msg))
 
     
 
 
 	def request(self,soc,msg):
+		
+		hprint( "received from "+str(soc.getpeername()) + '\n' + str(msg))
 		msg = json.loads(msg)
 		#print "received",msg,"from",soc.getpeername()
 		
@@ -250,65 +265,69 @@ class server(object):
 				#user exists already send retry
 				tosend = message(a = 0)
 				self.sendmsg(soc,tosend)
-				print "user already exists"
+				hprint( "user already exists")
 
 			else:
 				#add record and log in and send auth
-				sql = "insert into users(uname,password,email,tgames,wgames) values(?,?,?,0,0);"
+				sql = "insert into users(uname,email,password,tgames,wgames) values(?,?,?,0,0);"
 				self.con.execute(sql,tup)
 				self.con.commit()
 				loggedin = 1
 				tosend = message(a = 1)
 				self.sendmsg(soc,tosend)
-				print "new user added to db"
+				hprint( "new user added to db")
 				sql = "select id from users where uname = ?"
 				userid = self.con.execute(sql,(tup[0],)).fetchall()[0][0]
-		elif msg['d']==2:
+		if msg['d']==2:
 			#log in existing user
 			sql = "select count(1) from users where uname = ?"
 			existing = self.con.execute(sql,(tup[0],)).fetchall()[0][0]
+			#print "existing",existing
 			if existing == 1:
 				sql = "select id from users where uname = ?"
 				userid = self.con.execute(sql,(tup[0],)).fetchall()[0][0]
-			sql = "select password from users where uname = ?;"
-			password = self.con.execute(sql,(tup[0],)).fetchall()
-			if password != []:
-				(password,) = password[0]
+				#print "userid",userid
+				sql = "select password from users where uname = ?;"
+				password = self.con.execute(sql,(tup[0],)).fetchall()[0][0]
+				#print "password",password,"entered",tup[1]
+				if userid in self.online:
+					tosend = message(a = 0,o = 1)
+					self.sendmsg(soc,tosend)
 				
-			
-			if userid in self.online:
-				tosend = message(a = 0,o = 1)
-				self.sendmsg(soc,tosend)
-				
-			elif tup[1] == password and existing == 1:
-				#password matched send an auth
-				tosend = message(a = 1,o=0)
-				self.sendmsg(soc,tosend)
-				loggedin  = 1
-				
+				elif tup[1] == password :
+					#password matched send an auth
+					tosend = message(a = 1,o=0)
+					self.sendmsg(soc,tosend)
+					loggedin  = 1
+				else:
+					#send retry
+					tosend = message(a = 0,o=0)
+					#print tosend
+					self.sendmsg(soc,tosend)
 				
 			else:
 				#send retry
-				
 				tosend = message(a = 0,o=0)
-				print tosend
+				#print tosend
 				self.sendmsg(soc,tosend)
-				
+
+
+		#putting elif to send one message at a time 
 		#if logged in add to wait list
 		if loggedin == 1 :
-			print soc.getpeername(),"logged in successfully"
+			hprint( str(soc.getpeername()) +" logged in successfully")
 			self.getid[soc] = userid
 			self.online.append(userid)
 			if self.waitq.isempty():
 				#if no one is availabe , tell client to wait
 				self.waitq.add(soc)
-				print "4.client ",soc.getpeername(),"told to wait"
+				hprint( "client " + str(soc.getpeername()) + "told to wait")
 				msg = message(w = 1)
-				self.msgq[soc].put(json.dumps(msg))
+				self.sendmsg(soc,msg)
 			else:
 				#remove one from  wait list and pair
 				opponent = self.waitq.pop()
-				print "5.connecting ",opponent.getpeername()," and ",soc.getpeername()
+				hprint( "connecting " + str(opponent.getpeername()) + " and " + str(soc.getpeername()))
 				#find  a better way
 				self.pairs[soc] = opponent
 				self.pairs[opponent] = soc
@@ -336,10 +355,15 @@ class server(object):
 
 
 if __name__ == "__main__":
-	if sys.argv == []:
+	if sys.argv[1:] == []:
 		addr = ("",5000)
+		hprint( "starting server on default address")
 	else:
-		args = sys.argv[1:]
-		addr = (args[0],int(args[1]))
+		try:
+			args = sys.argv[1:]
+			addr = (args[0],int(args[1]))
+		except:
+			hprint( "usage : arg1 = hostname , arg2 = port ")
+			sys.exit()
 	gameserver = server(addr)
 	gameserver.start()
