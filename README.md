@@ -1,6 +1,9 @@
 # Multiplayer-TicTacToe
 Multiplayer TicTacToe is based on socket module in python.
 The server is implemented via asynchronous event driven approach using select module
-Server communicates with clients to see if they are ready to join a game and adds the client to a wait list , 2 clients are paired and a game is initiated between them.
-Server acts as middleware and handles messages between the paired clients.
+Server communicates with clients to see if they are ready to join a game and adds the client to a wait list , 2 clients are paired and a game is initiated between them.Server acts as middleware and handles messages between the paired clients.
+
+Implemented server with asynchronous management of logins and disconnects and basic authorization using username and password
+
+Added unbeatable ai player implemented using minimax algo
 
