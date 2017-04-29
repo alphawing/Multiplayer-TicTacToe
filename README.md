@@ -40,8 +40,9 @@ python client.py host port
 
 The tic tac toe board is represented as a grid and moves are represented by numbers written in the cells. Enter the corresponding number to make a move.
 
-##Todo
+## Todo
 * implement a GUI
 * saving game stats on server
 * assign rating to players according to total matches won
 * Add an AI player that does not play optimally (introduce random errors in current ai)
+* p2p communication for clients
